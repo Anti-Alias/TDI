@@ -1,19 +1,16 @@
 use crate::SelectionList;
+use crate::{Todo, TodoList};
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind};
-use ratatui::buffer::Buffer;
-use ratatui::layout::{Alignment, Constraint, Layout, Rect};
-use ratatui::style::Stylize;
-use ratatui::text::Line;
-use ratatui::widgets::{Block, Borders, Widget, WidgetRef};
+use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::{DefaultTerminal, Frame};
 use std::collections::HashMap;
 
 #[derive(Clone, Eq, PartialEq)]
 pub struct App {
-    todo_lists: SelectionList<TodoList>,
-    mode: Mode,
-    key_mappings: HashMap<(Mode, KeyCode), Action>,
-    quit: bool,
+    todo_lists: SelectionList<TodoList>, // All todo lists, laid out horizontally
+    mode: Mode,                          // Mode of the app, influencing key presses.
+    quit: bool,                          // App will quit when this value is set to true.
+    key_mappings: HashMap<(Mode, KeyCode), Action>, // Maps key presses to actions for a given mode
 }
 
 impl Default for App {
@@ -58,8 +55,8 @@ impl App {
             Action::MoveDown => self.select_next_todo(),
             Action::MoveTop => self.select_top_todo(),
             Action::MoveBottom => self.select_bottom_todo(),
-            Action::AddTodoAbove => self.add_todo(false),
-            Action::AddTodoBelow => self.add_todo(true),
+            Action::AddTodoAbove => self.add_todo(Todo::new("Todo Name"), false),
+            Action::AddTodoBelow => self.add_todo(Todo::new("Todo Name"), true),
             Action::DeleteTodo => self.remove_todo(),
         }
         Ok(())
@@ -167,7 +164,7 @@ impl App {
         selected_list.todos.select_last();
     }
 
-    fn add_todo(&mut self, below: bool) {
+    fn add_todo(&mut self, todo: Todo, below: bool) {
         let Some(selected_list) = self.todo_lists.selected_mut() else {
             return;
         };
@@ -178,7 +175,7 @@ impl App {
         } else {
             selected_todo_index
         };
-        todos.insert(index, "New Todo".to_owned());
+        todos.insert(index, todo);
         todos.select(index);
     }
 
@@ -219,6 +216,7 @@ impl App {
     }
 }
 
+/// Value that causes an [`App`] to perform an action.
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]
 enum Action {
     MoveLeft,
@@ -234,96 +232,11 @@ enum Action {
     Quit,
 }
 
+/// Current mode of an [`App`] which determines the action keys map to.
 #[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
 enum Mode {
+    /// Initial mode, allowing user to navigate todo lists.
     Normal,
+    /// Mode when inserting a value in the cell of a todo.
     Insert,
-}
-
-#[derive(Clone, Eq, PartialEq, Debug)]
-pub struct TodoList {
-    name: String,
-    todos: SelectionList<String>,
-    is_selected: bool,
-}
-
-impl TodoList {
-    pub fn new(name: impl Into<String>) -> Self {
-        Self {
-            name: name.into(),
-            todos: SelectionList::default(),
-            is_selected: false,
-        }
-    }
-
-    pub fn push(&mut self, todo: impl Into<String>) {
-        self.todos.push(todo.into());
-    }
-
-    pub fn insert(&mut self, index: usize, todo: impl Into<String>) {
-        self.todos.insert(index, todo.into());
-    }
-
-    pub fn remove(&mut self, index: usize) {
-        self.todos.remove(index);
-    }
-
-    pub fn todos(&self) -> &[String] {
-        self.todos.elements()
-    }
-
-    pub fn todos_mut(&mut self) -> &mut [String] {
-        self.todos.elements_mut()
-    }
-
-    pub fn select_previous(&mut self) {
-        self.todos.select_backwards(1);
-    }
-
-    pub fn select_next(&mut self) {
-        self.todos.select_forwards(1);
-    }
-}
-
-impl WidgetRef for TodoList {
-    fn render_ref(&self, area: Rect, buf: &mut Buffer) {
-        let color = if self.is_selected {
-            color::BORDER_SELECTED
-        } else {
-            color::BORDER_UNSELECTED
-        };
-        Block::default()
-            .title(self.name.as_ref())
-            .borders(Borders::all())
-            .title_alignment(Alignment::Center)
-            .fg(color)
-            .render_ref(area, buf);
-        let mut line_area = area;
-        line_area.x += 2;
-        line_area.width -= 4;
-        line_area.height = 1;
-        for (i, todo) in self.todos.iter().enumerate() {
-            let is_todo_selected = self.is_selected && i == self.todos.selected_index().unwrap();
-            let (bg_color, fg_color) = match is_todo_selected {
-                false => (color::BG_UNSELECTED, color::FG_UNSELECTED),
-                true => (color::BG_SELECTED, color::FG_SELECTED),
-            };
-            line_area.y += 1;
-            Line::from(todo.as_str())
-                .bg(bg_color)
-                .fg(fg_color)
-                .render(line_area, buf);
-        }
-    }
-}
-
-mod color {
-    use crossterm::style::Color;
-
-    pub const BG_UNSELECTED: Color = Color::Black;
-    pub const FG_UNSELECTED: Color = Color::White;
-    pub const BG_SELECTED: Color = Color::White;
-    pub const FG_SELECTED: Color = Color::Black;
-    pub const BORDER_UNSELECTED: Color = Color::White;
-    pub const BORDER_SELECTED: Color = Color::Yellow;
 }

@@ -1,5 +1,8 @@
-mod selection;
 mod app;
+pub mod color;
+mod selection;
+mod todo;
 
-use selection::*;
 pub use app::*;
+use selection::*;
+pub use todo::*;
