@@ -1,4 +1,3 @@
-use crate::SelectionList;
 use crate::{Todo, TodoList};
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind};
 use ratatui::layout::{Constraint, Layout, Rect};
@@ -7,211 +6,343 @@ use std::collections::HashMap;
 
 #[derive(Clone, Eq, PartialEq)]
 pub struct App {
-    todo_lists: SelectionList<TodoList>, // All todo lists, laid out horizontally
-    mode: Mode,                          // Mode of the app, influencing key presses.
-    quit: bool,                          // App will quit when this value is set to true.
+    todo_lists: Vec<TodoList>,                      // All todo lists
+    selection: Selection,                           // What is currently selected by the user
+    mode: Mode,                                     // Mode of the app, influencing key presses.
     key_mappings: HashMap<(Mode, KeyCode), Action>, // Maps key presses to actions for a given mode
+}
+
+#[derive(Copy, Clone, Eq, PartialEq, Default, Debug)]
+pub struct Selection {
+    pub todo_list: usize,   // Todo list selected
+    pub todo: usize,        // Todo in todo list selected
+    pub char: usize,   // Index of character in todo selected, if any
 }
 
 impl Default for App {
     fn default() -> Self {
         Self {
-            todo_lists: SelectionList::default(),
+            todo_lists: Vec::default(),
+            selection: Selection::default(),
             mode: Mode::Normal,
             key_mappings: Self::default_key_mappings(),
-            quit: false,
         }
     }
 }
-
 impl App {
+
     /// Consumes and runs application.
     pub fn run(mut self, mut terminal: DefaultTerminal) -> anyhow::Result<()> {
         loop {
             terminal.draw(|frame| self.render(frame))?;
-            self.update()?;
-            if self.quit {
-                return Ok(());
-            }
-        }
-    }
-
-    pub fn push_todo_list(&mut self, mut todo_list: TodoList) {
-        if self.todo_lists.is_empty() {
-            todo_list.is_selected = true;
-        }
-        self.todo_lists.push(todo_list);
-    }
-
-    /// Waits for user input, then updates state.
-    fn update(&mut self) -> anyhow::Result<()> {
-        let action = self.read_next_action()?;
-        match action {
-            Action::SetMode(mode) => self.mode = mode,
-            Action::Quit => self.quit = true,
-            Action::MoveLeft => self.select_previous_list(),
-            Action::MoveRight => self.select_next_list(),
-            Action::MoveUp => self.select_previous_todo(),
-            Action::MoveDown => self.select_next_todo(),
-            Action::MoveTop => self.select_top_todo(),
-            Action::MoveBottom => self.select_bottom_todo(),
-            Action::AddTodoAbove => self.add_todo(Todo::new("Todo Name"), false),
-            Action::AddTodoBelow => self.add_todo(Todo::new("Todo Name"), true),
-            Action::DeleteTodo => self.remove_todo(),
+            let action = self.read_next_action()?;
+            let quit = self.update(action)?;
+            if quit { break }
         }
         Ok(())
     }
 
+    /// Waits for user input, then updates state.
+    /// Returns true if application should quit.
+    fn update(&mut self, action: Action) -> anyhow::Result<bool> {
+        match action {
+            Action::DeleteTodo      => self.delete_todo(),
+            Action::MoveTodoLeft    => self.move_todo_left(),
+            Action::MoveTodoRight   => self.move_todo_right(),
+            Action::MoveTodoUp      => self.move_todo_up(),
+            Action::MoveTodoDown    => self.move_todo_down(),
+            Action::Quit            => return Ok(true),
+            Action::SetMode(mode)   => self.set_mode(mode),
+            Action::MoveLeft        => self.move_left(),
+            Action::MoveRight       => self.move_right(),
+            Action::MoveUp          => self.move_up(),
+            Action::MoveDown        => self.move_down(),
+            Action::MoveTop         => self.move_top(),
+            Action::MoveBottom      => self.move_bottom(),
+            Action::AddTodoAbove    => self.add_todo(false),
+            Action::AddTodoBelow    => self.add_todo(true),
+            Action::Input(code)     => self.input(code),
+            Action::MoveCursorRight => self.move_cursor_right(),
+            Action::MoveCursorLeft  => self.move_cursor_left(),
+            Action::MoveCursorStart => self.move_cursor_start(),
+            Action::MoveCursorEnd   => self.move_cursor_end(),
+        }
+        Ok(false)
+    }
+
+    // Adds another todo list to the end.
+    pub fn push_todo_list(&mut self, todo_list: TodoList) {
+        self.todo_lists.push(todo_list);
+    }
+
     /// Draws user interface.
     fn render(&self, frame: &mut Frame) {
-        let area = frame.area();
-        let content = Rect {
-            x: area.x,
-            y: area.y,
-            width: area.width,
-            height: area.height - 1,
-        };
-        let bottom_row = Rect {
-            x: area.x,
-            y: area.height - 1,
-            width: area.width,
-            height: 1,
-        };
-        let mode_text = match self.mode {
-            Mode::Normal => "Normal",
-            Mode::Insert => "Insert",
-        };
-        let constraints = vec![Constraint::Percentage(50); self.todo_lists.len()];
+
+        // Computes areas to render in
+        let area            = frame.area();
+        let content_area    = Rect { x: area.x, y: area.y, width: area.width, height: area.height - 1 }; // Lists
+        let bottom_area     = Rect { x: area.x, y: area.height - 1, width: area.width, height: 1 };
+        let constraints     = vec![Constraint::Percentage(50); self.todo_lists.len()];
         let list_areas = Layout::default()
             .direction(ratatui::layout::Direction::Horizontal)
             .constraints(constraints)
-            .split(content);
-        for (todo_list, area) in self.todo_lists.iter().zip(list_areas.iter().copied()) {
-            frame.render_widget(todo_list, area);
+            .split(content_area);
+
+        // Renders todo lists
+        if !self.todo_lists.is_empty() {
+            let sel_list_idx = self.selection.todo_list;
+            let sel_list_idx = sel_list_idx.min(self.todo_lists.len()-1);
+            for (i, (todo_list, todo_list_area)) in self.todo_lists.iter()
+                .zip(list_areas.iter().copied())
+                .enumerate() 
+            {
+                let is_list_selected = i == sel_list_idx;
+                todo_list.render(
+                    is_list_selected,
+                    self.selection.todo,
+                    self.selection.char,
+                    self.mode,
+                    todo_list_area,
+                    frame,
+                );
+            }
         }
-        frame.render_widget(mode_text, bottom_row);
+
+        // Renders bottom row
+        let mode_text = match self.mode { Mode::Normal => "Normal", Mode::Insert => "Insert" };
+        frame.render_widget(mode_text, bottom_area);
     }
 
     /// Waits for the user to input motion, then returns the action corresponding to that key press.
     fn read_next_action(&self) -> anyhow::Result<Action> {
         loop {
-            if let Event::Key(KeyEvent {
-                code,
-                kind: KeyEventKind::Press,
-                ..
-            }) = event::read()?
-            {
+            if let Event::Key(KeyEvent { code, kind: KeyEventKind::Press, .. }) = event::read()? {
                 if let Some(action) = self.key_mappings.get(&(self.mode, code)) {
                     return Ok(*action);
+                }
+                else if self.mode == Mode::Insert {
+                    return Ok(Action::Input(code))
                 }
             }
         }
     }
 
-    fn select_next_list(&mut self) {
-        let Some(last_list) = self.todo_lists.selected_mut() else {
-            return;
-        };
-        let last_todo_index = last_list.todos.selected_index().unwrap_or(0);
-        last_list.is_selected = false;
-        self.todo_lists.select_forwards_wrapping(1);
-        let Some(list) = self.todo_lists.selected_mut() else {
-            return;
-        };
-        list.todos.select(last_todo_index);
-        list.is_selected = true;
+    /// Index of the currently selected todo list 
+    fn selected_todo_list(&self) -> Option<usize> {
+        if self.todo_lists.is_empty() { return None };
+        Some(self.selection.todo_list)
     }
 
-    fn select_previous_list(&mut self) {
-        let Some(last_list) = self.todo_lists.selected_mut() else {
-            return;
-        };
-        let last_todo_index = last_list.todos.selected_index().unwrap_or(0);
-        last_list.is_selected = false;
-        self.todo_lists.select_backwards_wrapping(1);
-        let Some(list) = self.todo_lists.selected_mut() else {
-            return;
-        };
-        list.todos.select(last_todo_index);
-        list.is_selected = true;
+    /// Selects the desired todo list 
+    fn select_todo_list(&mut self, todo_list_idx: usize) {
+        if todo_list_idx >= self.todo_lists.len() { return }
+        self.selection.todo_list = todo_list_idx;
     }
 
-    fn select_previous_todo(&mut self) {
-        let Some(selected_list) = self.todo_lists.selected_mut() else {
-            return;
-        };
-        selected_list.todos.select_backwards(1);
+    /// Selects the desired todo 
+    fn select_todo(&mut self, todo_list_idx: usize, todo_idx: usize) {
+        if todo_list_idx >= self.todo_lists.len() { return }
+        self.selection.todo_list = todo_list_idx;
+        let todo_list = &mut self.todo_lists[todo_list_idx];
+        if todo_idx >= todo_list.todos.len() { return }
+        self.selection.todo = todo_idx;
     }
 
-    fn select_next_todo(&mut self) {
-        let Some(selected_list) = self.todo_lists.selected_mut() else {
-            return;
-        };
-        selected_list.todos.select_forwards(1);
+    /// Indices of the currently selected todo 
+    fn selected_todo(&self) -> Option<(usize, usize)> {
+        if self.todo_lists.is_empty() { return None };
+        let todo_list_idx = self.selection.todo_list;
+        let todo_list = &self.todo_lists[todo_list_idx];
+        if todo_list.todos.is_empty() { return None };
+        let todo_idx = self.selection.todo.min(todo_list.todos.len()-1);
+        Some((todo_list_idx, todo_idx))
     }
 
-    fn select_top_todo(&mut self) {
-        let Some(selected_list) = self.todo_lists.selected_mut() else {
-            return;
-        };
-        selected_list.todos.select_first();
+    fn set_mode(&mut self, mode: Mode) {
+        if mode == Mode::Insert {
+            let todo_list = &self.todo_lists[self.selection.todo_list];
+            if todo_list.todos.is_empty() { return }
+            self.selection.char = 0; 
+        }
+        self.mode = mode;
     }
 
-    fn select_bottom_todo(&mut self) {
-        let Some(selected_list) = self.todo_lists.selected_mut() else {
-            return;
-        };
-        selected_list.todos.select_last();
+    fn move_left(&mut self) {
+        let Some(todo_list_idx) = self.selected_todo_list() else { return };
+        if todo_list_idx == 0 { return };
+        self.select_todo_list(todo_list_idx-1);
     }
 
-    fn add_todo(&mut self, todo: Todo, below: bool) {
-        let Some(selected_list) = self.todo_lists.selected_mut() else {
-            return;
-        };
-        let todos = &mut selected_list.todos;
-        let selected_todo_index = todos.selected_index().unwrap_or(0);
-        let index = if below {
-            1 + selected_todo_index
-        } else {
-            selected_todo_index
-        };
-        todos.insert(index, todo);
-        todos.select(index);
+    fn move_right(&mut self) {
+        let Some(todo_list_idx) = self.selected_todo_list() else { return };
+        self.select_todo_list(todo_list_idx+1);
     }
 
-    fn remove_todo(&mut self) {
-        let Some(selected_list) = self.todo_lists.selected_mut() else {
-            return;
+    fn move_up(&mut self) {
+        let Some((todo_list_idx, todo_idx)) = self.selected_todo() else { return };
+        if todo_idx == 0 { return };
+        self.select_todo(todo_list_idx, todo_idx-1);
+    }
+
+    fn move_down(&mut self) {
+        let Some((todo_list_idx, todo_idx)) = self.selected_todo() else { return };
+        self.select_todo(todo_list_idx, todo_idx+1);
+    }
+
+    fn move_top(&mut self) {
+        let Some(todo_list_idx) = self.selected_todo_list() else { return };
+        self.select_todo(todo_list_idx, 0);
+    }
+
+    fn move_bottom(&mut self) {
+        let Some(todo_list_idx) = self.selected_todo_list() else { return };
+        let todo_list = &self.todo_lists[todo_list_idx];
+        if todo_list.todos.is_empty() { return };
+        self.select_todo(todo_list_idx, todo_list.todos.len() - 1);
+    }
+
+    /// Inserts a [`Todo`] above or below the currently selected todo
+    fn add_todo(&mut self, below: bool) {
+        if self.todo_lists.is_empty() { return };
+        let todo_list = &mut self.todo_lists[self.selection.todo_list];
+        let todos = &mut todo_list.todos;
+        let todo_idx = match below {
+            false   => self.selection.todo.min(todos.len()),
+            true    => (self.selection.todo+1).min(todos.len()),
         };
-        let todos = &mut selected_list.todos;
-        let Some(selected_todo_index) = todos.selected_index() else {
-            return;
-        };
-        todos.remove(selected_todo_index);
+        todos.insert(todo_idx, Todo::new(""));
+        self.selection.todo = todo_idx;
+        self.set_mode(Mode::Insert);
+    }
+
+    /// Removes the currently selected [`Todo`]
+    fn delete_todo(&mut self) {
+        if self.todo_lists.is_empty() { return };
+        let todo_list = &mut self.todo_lists[self.selection.todo_list];
+        let todos = &mut todo_list.todos;
+        if todos.is_empty() { return };
+        let todo_idx = self.selection.todo.min(todos.len()-1);
+        todos.remove(todo_idx);
+    }
+
+    fn move_todo_left(&mut self) {
+        let Some((todo_list_idx, todo_idx)) = self.selected_todo() else { return };
+        if todo_list_idx == 0 { return };
+        let todo_list = &mut self.todo_lists[todo_list_idx];
+        let todo = todo_list.todos.remove(todo_idx);
+        let next_todo_list = &mut self.todo_lists[todo_list_idx-1];
+        let next_todo_idx = self.selection.todo.min(next_todo_list.todos.len());
+        next_todo_list.todos.insert(next_todo_idx, todo);
+        self.selection.todo_list -= 1;
+    }
+
+    fn move_todo_right(&mut self) {
+        let Some((todo_list_idx, todo_idx)) = self.selected_todo() else { return };
+        if todo_list_idx == self.todo_lists.len()-1 { return };
+        let todo_list = &mut self.todo_lists[todo_list_idx];
+        let todo = todo_list.todos.remove(todo_idx);
+        let next_todo_list = &mut self.todo_lists[todo_list_idx+1];
+        let next_todo_idx = self.selection.todo.min(next_todo_list.todos.len());
+        next_todo_list.todos.insert(next_todo_idx, todo);
+        self.selection.todo_list += 1;
+    }
+
+    fn move_todo_up(&mut self) {
+        let Some((todo_list_idx, todo_idx)) = self.selected_todo() else { return };
+        if todo_idx == 0 { return };
+        let todo_list = &mut self.todo_lists[todo_list_idx];
+        todo_list.todos.swap(todo_idx, todo_idx-1);
+        self.select_todo(todo_list_idx, todo_idx-1);
+    }
+
+    fn move_todo_down(&mut self) {
+        let Some((todo_list_idx, todo_idx)) = self.selected_todo() else { return };
+        let todo_list = &mut self.todo_lists[todo_list_idx];
+        if todo_idx == todo_list.todos.len() - 1 { return };
+        todo_list.todos.swap(todo_idx, todo_idx+1);
+        self.select_todo(todo_list_idx, todo_idx+1);
+    }
+
+    /// Inputs a character to the name of the currently selected [`Todo`].
+    fn input(&mut self, code: KeyCode) {
+        if self.todo_lists.is_empty() { return };
+        let todo_list = &mut self.todo_lists[self.selection.todo_list];
+        let todos = &mut todo_list.todos;
+        if todos.is_empty() { return };
+        let todo_idx = self.selection.todo.min(todos.len()-1);
+        let todo = &mut todos[todo_idx];
+        let char_index = self.selection.char;
+        match code {
+            KeyCode::Char(c) => {
+                todo.name.insert(char_index, c);
+                self.selection.char += 1;
+            }
+            KeyCode::Backspace => {
+                if self.selection.char > 0 {
+                    todo.name.remove(char_index - 1);
+                    self.selection.char -= 1;
+                }
+            }
+            KeyCode::Delete => {
+                if self.selection.char < todo.name.len() {
+                    todo.name.remove(char_index);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn move_cursor_right(&mut self) {
+        let Some(todo_list) = self.todo_lists.get(self.selection.todo_list) else { return };
+        let todo = &todo_list.todos[self.selection.todo];
+        if self.selection.char >= todo.name.len() { return };
+        self.selection.char += 1;
+    }
+
+    fn move_cursor_left(&mut self) {
+        if self.selection.char == 0 { return };
+        self.selection.char -= 1;
+    }
+
+    fn move_cursor_start(&mut self) {
+        self.selection.char = 0;
+    }
+
+    fn move_cursor_end(&mut self) {
+        let Some(todo_list) = self.todo_lists.get(self.selection.todo_list) else { return };
+        let todo = &todo_list.todos[self.selection.todo];
+        self.selection.char = todo.name.len();
     }
 
     fn default_key_mappings() -> HashMap<(Mode, KeyCode), Action> {
         let mut res = HashMap::new();
-        res.insert((Mode::Normal, KeyCode::Char('o')), Action::AddTodoBelow);
-        res.insert((Mode::Normal, KeyCode::Char('O')), Action::AddTodoAbove);
-        res.insert((Mode::Normal, KeyCode::Char('D')), Action::DeleteTodo);
-        res.insert((Mode::Normal, KeyCode::Char('h')), Action::MoveLeft);
-        res.insert((Mode::Normal, KeyCode::Char('j')), Action::MoveDown);
-        res.insert((Mode::Normal, KeyCode::Char('k')), Action::MoveUp);
-        res.insert((Mode::Normal, KeyCode::Char('l')), Action::MoveRight);
-        res.insert((Mode::Normal, KeyCode::Char('g')), Action::MoveTop);
-        res.insert((Mode::Normal, KeyCode::Char('G')), Action::MoveBottom);
-        res.insert((Mode::Normal, KeyCode::Char('q')), Action::Quit);
-        res.insert((Mode::Normal, KeyCode::Left), Action::MoveLeft);
-        res.insert((Mode::Normal, KeyCode::Down), Action::MoveDown);
-        res.insert((Mode::Normal, KeyCode::Up), Action::MoveUp);
-        res.insert((Mode::Normal, KeyCode::Right), Action::MoveRight);
-        res.insert((Mode::Normal, KeyCode::Char('q')), Action::Quit);
-        res.insert(
-            (Mode::Normal, KeyCode::Char('i')),
-            Action::SetMode(Mode::Insert),
-        );
-        res.insert((Mode::Insert, KeyCode::Esc), Action::SetMode(Mode::Normal));
+        res.insert((Mode::Normal, KeyCode::Char('o')),  Action::AddTodoBelow);
+        res.insert((Mode::Normal, KeyCode::Char('O')),  Action::AddTodoAbove);
+        res.insert((Mode::Normal, KeyCode::Char('d')),  Action::DeleteTodo);
+        res.insert((Mode::Normal, KeyCode::Char('H')),  Action::MoveTodoLeft);
+        res.insert((Mode::Normal, KeyCode::Char('J')),  Action::MoveTodoDown);
+        res.insert((Mode::Normal, KeyCode::Char('K')),  Action::MoveTodoUp);
+        res.insert((Mode::Normal, KeyCode::Char('L')),  Action::MoveTodoRight);
+        res.insert((Mode::Normal, KeyCode::Char('h')),  Action::MoveLeft);
+        res.insert((Mode::Normal, KeyCode::Char('j')),  Action::MoveDown);
+        res.insert((Mode::Normal, KeyCode::Char('k')),  Action::MoveUp);
+        res.insert((Mode::Normal, KeyCode::Char('l')),  Action::MoveRight);
+        res.insert((Mode::Normal, KeyCode::Char('g')),  Action::MoveTop);
+        res.insert((Mode::Normal, KeyCode::Char('G')),  Action::MoveBottom);
+        res.insert((Mode::Normal, KeyCode::Home),       Action::MoveTop);
+        res.insert((Mode::Normal, KeyCode::End),        Action::MoveBottom);
+        res.insert((Mode::Normal, KeyCode::Char('q')),  Action::Quit);
+        res.insert((Mode::Normal, KeyCode::Left),       Action::MoveLeft);
+        res.insert((Mode::Normal, KeyCode::Down),       Action::MoveDown);
+        res.insert((Mode::Normal, KeyCode::Up),         Action::MoveUp);
+        res.insert((Mode::Normal, KeyCode::Right),      Action::MoveRight);
+        res.insert((Mode::Normal, KeyCode::Char('q')),  Action::Quit);
+        res.insert((Mode::Normal, KeyCode::Char('i')),  Action::SetMode(Mode::Insert));
+        res.insert((Mode::Insert, KeyCode::Esc),        Action::SetMode(Mode::Normal));
+        res.insert((Mode::Insert, KeyCode::Right),      Action::MoveCursorRight);
+        res.insert((Mode::Insert, KeyCode::Left),       Action::MoveCursorLeft);
+        res.insert((Mode::Insert, KeyCode::Home),       Action::MoveCursorStart);
+        res.insert((Mode::Insert, KeyCode::End),        Action::MoveCursorEnd);
         res
     }
 }
@@ -219,6 +350,11 @@ impl App {
 /// Value that causes an [`App`] to perform an action.
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]
 enum Action {
+    DeleteTodo,
+    MoveTodoLeft,
+    MoveTodoRight,
+    MoveTodoUp,
+    MoveTodoDown,
     MoveLeft,
     MoveRight,
     MoveUp,
@@ -227,14 +363,18 @@ enum Action {
     MoveBottom,
     AddTodoAbove,
     AddTodoBelow,
-    DeleteTodo,
+    Input(KeyCode),
     SetMode(Mode),
+    MoveCursorRight,
+    MoveCursorLeft,
+    MoveCursorStart,
+    MoveCursorEnd,
     Quit,
 }
 
 /// Current mode of an [`App`] which determines the action keys map to.
 #[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
-enum Mode {
+pub enum Mode {
     /// Initial mode, allowing user to navigate todo lists.
     Normal,
     /// Mode when inserting a value in the cell of a todo.
