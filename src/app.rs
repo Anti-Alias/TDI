@@ -13,10 +13,10 @@ pub struct App {
 }
 
 #[derive(Copy, Clone, Eq, PartialEq, Default, Debug)]
-pub struct Selection {
-    pub todo_list: usize,   // Todo list selected
-    pub todo: usize,        // Todo in todo list selected
-    pub char: usize,   // Index of character in todo selected, if any
+struct Selection {
+    todo_list: usize,   // Todo list selected
+    todo: usize,        // Todo in todo list selected
+    char: usize,        // Index of character in todo selected, if any
 }
 
 impl Default for App {
@@ -113,7 +113,7 @@ impl App {
         frame.render_widget(mode_text, bottom_area);
     }
 
-    /// Waits for the user to input motion, then returns the action corresponding to that key press.
+    /// Waits for user input, then returns the corresponding action
     fn read_next_action(&self) -> anyhow::Result<Action> {
         loop {
             if let Event::Key(KeyEvent { code, kind: KeyEventKind::Press, .. }) = event::read()? {
@@ -318,7 +318,7 @@ impl App {
         let mut res = HashMap::new();
         res.insert((Mode::Normal, KeyCode::Char('o')),  Action::AddTodoBelow);
         res.insert((Mode::Normal, KeyCode::Char('O')),  Action::AddTodoAbove);
-        res.insert((Mode::Normal, KeyCode::Char('d')),  Action::DeleteTodo);
+        res.insert((Mode::Normal, KeyCode::Char('x')),  Action::DeleteTodo);
         res.insert((Mode::Normal, KeyCode::Char('H')),  Action::MoveTodoLeft);
         res.insert((Mode::Normal, KeyCode::Char('J')),  Action::MoveTodoDown);
         res.insert((Mode::Normal, KeyCode::Char('K')),  Action::MoveTodoUp);
@@ -375,7 +375,7 @@ enum Action {
 /// Current mode of an [`App`] which determines the action keys map to.
 #[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
 pub enum Mode {
-    /// Initial mode, allowing user to navigate todo lists.
+    /// Initial mode, allowing user to navigate and move todo lists.
     Normal,
     /// Mode when inserting a value in the cell of a todo.
     Insert,

@@ -3,7 +3,7 @@ use ratatui::Frame;
 use ratatui::layout::{Alignment, Rect};
 use ratatui::style::Stylize;
 use ratatui::text::Line;
-use ratatui::widgets::{Block, Borders, Widget, WidgetRef};
+use ratatui::widgets::{Block, Borders};
 
 #[derive(Clone, Eq, PartialEq, Debug)]
 pub struct TodoList {
