@@ -59,9 +59,7 @@ impl App {
             terminal.draw(|frame| self.render(frame))?;
             let action = self.read_next_action()?;
             let quit = self.update(action)?;
-            if quit {
-                break;
-            }
+            if quit { break }
         }
         Ok(())
     }
@@ -93,6 +91,7 @@ impl App {
             Action::MoveCursorLeft => self.move_cursor_left(),
             Action::MoveCursorStart => self.move_cursor_start(),
             Action::MoveCursorEnd => self.move_cursor_end(),
+            Action::Nop => {},
         }
         Ok(false)
     }
@@ -149,20 +148,21 @@ impl App {
         frame.render_widget(mode_text, bottom_area);
     }
 
-    /// Waits for user input, then returns the corresponding action
+    /// Waits for an event, input, then returns the corresponding action
     fn read_next_action(&self) -> anyhow::Result<Action> {
         loop {
-            if let Event::Key(KeyEvent {
-                code,
-                kind: KeyEventKind::Press,
-                ..
-            }) = event::read()?
-            {
-                if let Some(action) = self.key_mappings.get(&(self.mode, code)) {
-                    return Ok(*action);
-                } else if self.mode == Mode::Insert {
-                    return Ok(Action::Input(code));
-                }
+            match event::read()? {
+                Event::Key(KeyEvent { code, kind: KeyEventKind::Press, .. }) => {
+                    if let Some(action) = self.key_mappings.get(&(self.mode, code)) {
+                        return Ok(*action);
+                    } else if self.mode == Mode::Insert {
+                        return Ok(Action::Input(code));
+                    }
+                },
+                Event::Resize(_, _) => {
+                   return Ok(Action::Nop);
+                },
+                _ => {},
             }
         }
     }
@@ -516,6 +516,7 @@ enum Action {
     MoveCursorLeft,
     MoveCursorStart,
     MoveCursorEnd,
+    Nop,                // No operation. Useful if app needs to rerender.
     Quit,
 }
 
