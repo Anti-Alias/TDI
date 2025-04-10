@@ -31,6 +31,21 @@ struct State {
     backlog: TodoList,
 }
 
+impl Default for State {
+    fn default() -> Self {
+        Self {
+            todo_list: TodoList {
+                name: "Todo".to_owned(),
+                todos: vec![],
+            },
+            backlog: TodoList {
+                name: "Backlog".to_owned(),
+                todos: vec![],
+            },
+        }
+    }
+}
+
 #[derive(Copy, Clone, Eq, PartialEq, Default, Debug)]
 struct Selection {
     todo_list: usize, // Todo list selected
@@ -43,7 +58,11 @@ impl App {
     /// Creates and initializes the application.
     pub fn init() -> anyhow::Result<Self> {
         let config = load_app_config()?;
-        let state = load_app_state(&config.dbpath)?;
+        let dbpath = &config.dbpath;
+        let state = match Path::new(dbpath).exists() {
+            true => load_app_state(dbpath)?,
+            false => State::default(),
+        };
         Ok(Self {
             config,
             todo_lists: vec![state.todo_list, state.backlog],
