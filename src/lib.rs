@@ -3,4 +3,4 @@ pub mod color;
 mod todo;
 
 pub use app::*;
-pub use todo::*;
+use todo::*;

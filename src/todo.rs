@@ -4,21 +4,15 @@ use ratatui::layout::{Alignment, Rect};
 use ratatui::style::Stylize;
 use ratatui::text::Line;
 use ratatui::widgets::{Block, Borders};
+use serde::{Serialize, Deserialize};
 
-#[derive(Clone, Eq, PartialEq, Debug)]
-pub struct TodoList {
+#[derive(Serialize, Deserialize, Clone, Eq, PartialEq, Debug)]
+pub(crate) struct TodoList {
     pub name: String,
     pub todos: Vec<Todo>,
 }
 
 impl TodoList {
-
-    pub fn new(name: impl Into<String>) -> Self {
-        Self {
-            name: name.into(),
-            todos: Vec::default(),
-        }
-    }
 
     pub fn render(&self,
         is_selected: bool,
@@ -67,8 +61,8 @@ impl TodoList {
 }
 
 /// A single todo in a [`TodoList`]
-#[derive(Clone, Eq, PartialEq, Default, Debug)]
-pub struct Todo {
+#[derive(Serialize, Deserialize, Clone, Eq, PartialEq, Default, Debug)]
+pub(crate) struct Todo {
     pub name: String,
 }
 

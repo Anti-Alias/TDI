@@ -1,13 +1,18 @@
-use tdi::{App, TodoList};
+use tdi::App;
 
 fn main() {
-    let mut app = App::default();
-    app.push_todo_list(TodoList::new("Todo"));
-    app.push_todo_list(TodoList::new("Backlog"));
+    if let Err(err) = run() {
+        eprintln!("{err}");
+    }
+}
 
+fn run() -> anyhow::Result<()> {
+    let app = App::init()?;
     let terminal = ratatui::init();
     if let Err(err) = app.run(terminal) {
         eprintln!("{err}");
     }
     ratatui::restore();
+    Ok(())
 }
+
