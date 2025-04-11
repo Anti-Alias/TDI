@@ -59,7 +59,7 @@ impl TodoList {
 
         // Sets cursor position
         if mode == Mode::Insert && is_selected {
-            let cursor_x = 2 + area.x + char_selected as u16;
+            let cursor_x = 4 + area.x + char_selected as u16;
             let cursor_y = 1 + area.y + todo_selected as u16;
             frame.set_cursor_position((cursor_x, cursor_y));
         }
