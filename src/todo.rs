@@ -3,7 +3,7 @@ use ratatui::Frame;
 use ratatui::layout::{Alignment, Rect};
 use ratatui::style::Stylize;
 use ratatui::text::Line;
-use ratatui::widgets::{Block, Borders};
+use ratatui::widgets::{Block, Borders, Paragraph, Widget};
 use serde::{Serialize, Deserialize};
 
 #[derive(Serialize, Deserialize, Clone, Eq, PartialEq, Debug)]
@@ -45,9 +45,15 @@ impl TodoList {
                     true => (color::BG_SELECTED, color::FG_SELECTED),
                 };
                 line_area.y += 1;
-                let todo_name = if todo.name.is_empty() { " " } else { &todo.name };
-                let line = Line::from(todo_name).bg(bg_color).fg(fg_color);
-                frame.render_widget(line, line_area);
+                if todo.name.is_empty() {
+                    let todo_line = Line::from("•").bg(bg_color).fg(fg_color);
+                    frame.render_widget(todo_line, line_area);
+                }
+                else {
+                    let todo_name = format!("• {}", todo.name);
+                    let todo_line = Line::from(todo_name).bg(bg_color).fg(fg_color);
+                    frame.render_widget(todo_line, line_area);
+                }
             }
         }
 

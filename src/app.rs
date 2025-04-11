@@ -117,6 +117,7 @@ impl App {
 
     /// Draws user interface.
     fn render(&self, frame: &mut Frame) {
+
         // Computes areas to render in
         let area = frame.area();
         let content_area = Rect {
@@ -124,7 +125,7 @@ impl App {
             y: area.y,
             width: area.width,
             height: area.height - 1,
-        }; // Lists
+        };
         let bottom_area = Rect {
             x: area.x,
             y: area.height - 1,
