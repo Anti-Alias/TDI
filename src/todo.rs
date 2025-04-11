@@ -3,7 +3,7 @@ use ratatui::Frame;
 use ratatui::layout::{Alignment, Rect};
 use ratatui::style::Stylize;
 use ratatui::text::Line;
-use ratatui::widgets::{Block, Borders, Paragraph, Widget};
+use ratatui::widgets::{Block, Borders};
 use serde::{Serialize, Deserialize};
 
 #[derive(Serialize, Deserialize, Clone, Eq, PartialEq, Debug)]
@@ -77,3 +77,4 @@ impl Todo {
         Self { name: name.into() }
     }
 }
+
