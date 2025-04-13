@@ -9,15 +9,6 @@ use serde::{Serialize, Deserialize};
 const TODO_IDX: usize       = 0;
 const BACKLOG_IDX: usize    = 1;
 
-#[derive(Clone, Eq, PartialEq)]
-pub struct App {
-    config: Config,
-    todo_lists: Vec<TodoList>,                      // All todo lists
-    selection: Selection,                           // What is currently selected by the user
-    mode: Mode,                                     // Mode of the app, influencing key presses.
-    key_mappings: HashMap<(Mode, KeyCode), Action>, // Maps key presses to actions for a given mode
-}
-
 #[derive(Serialize, Deserialize, Clone, Eq, PartialEq, Debug)]
 struct Config {
     /// Todo-list dabase path. 
@@ -53,6 +44,16 @@ struct Selection {
     char: usize,      // Index of character in todo selected, if any
 }
 
+#[derive(Clone, Eq, PartialEq)]
+pub struct App {
+    config: Config,
+    todo_lists: Vec<TodoList>,                      // All todo lists
+    selection: Selection,                           // What is currently selected by the user
+    mode: Mode,                                     // Mode of the app, influencing key presses.
+    key_mappings: HashMap<(Mode, KeyCode), Action>, // Maps key presses to actions for a given mode
+    changed: bool,                                  // Set to true if a change occurred, requiring saving
+}
+
 impl App {
 
     /// Creates and initializes the application.
@@ -69,6 +70,7 @@ impl App {
             selection: Selection::default(),
             mode: Mode::Normal,
             key_mappings: default_key_mappings(),
+            changed: false,
         })
     }
 
@@ -307,6 +309,7 @@ impl App {
         todos.insert(todo_idx, Todo::new(""));
         self.selection.todo = todo_idx;
         self.set_mode(Mode::Insert);
+        self.changed = true;
     }
 
     /// Removes the currently selected [`Todo`]
@@ -321,6 +324,7 @@ impl App {
         };
         let todo_idx = self.selection.todo.min(todos.len() - 1);
         todos.remove(todo_idx);
+        self.changed = true;
     }
 
     fn move_todo_left(&mut self) {
@@ -336,6 +340,7 @@ impl App {
         let next_todo_idx = self.selection.todo.min(next_todo_list.todos.len());
         next_todo_list.todos.insert(next_todo_idx, todo);
         self.selection.todo_list -= 1;
+        self.changed = true;
     }
 
     fn move_todo_right(&mut self) {
@@ -351,6 +356,7 @@ impl App {
         let next_todo_idx = self.selection.todo.min(next_todo_list.todos.len());
         next_todo_list.todos.insert(next_todo_idx, todo);
         self.selection.todo_list += 1;
+        self.changed = true;
     }
 
     fn move_todo_up(&mut self) {
@@ -363,6 +369,7 @@ impl App {
         let todo_list = &mut self.todo_lists[todo_list_idx];
         todo_list.todos.swap(todo_idx, todo_idx - 1);
         self.select_todo(todo_list_idx, todo_idx - 1);
+        self.changed = true;
     }
 
     fn move_todo_down(&mut self) {
@@ -375,6 +382,7 @@ impl App {
         };
         todo_list.todos.swap(todo_idx, todo_idx + 1);
         self.select_todo(todo_list_idx, todo_idx + 1);
+        self.changed = true;
     }
 
     /// Inputs a character to the name of the currently selected [`Todo`].
@@ -408,6 +416,7 @@ impl App {
             }
             _ => {}
         }
+        self.changed = true;
     }
 
     fn move_cursor_right(&mut self) {
@@ -441,7 +450,10 @@ impl App {
     }
 
 
-    fn save(&self) -> anyhow::Result<()> {
+    fn save(&mut self) -> anyhow::Result<()> {
+        if !self.changed {
+            return Ok(());
+        }
         let dbpath = Path::new(&self.config.dbpath);
         if let Some(parent) = dbpath.parent() {
             std::fs::create_dir_all(parent)?;
@@ -452,6 +464,7 @@ impl App {
         };
         let state_str = serde_yaml::to_string(&state)?;
         std::fs::write(dbpath, state_str)?;
+        self.changed = false;
         Ok(())
     }
 }
