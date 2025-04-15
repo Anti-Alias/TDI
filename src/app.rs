@@ -2,12 +2,11 @@ use crate::{Todo, TodoList};
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind};
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::{DefaultTerminal, Frame};
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::Path;
-use serde::{Serialize, Deserialize};
 
-const TODO_IDX: usize       = 0;
-const BACKLOG_IDX: usize    = 1;
+const APP_VERSION: & str = "0.1";
 
 #[derive(Clone, Eq, PartialEq)]
 pub struct App {
@@ -20,28 +19,31 @@ pub struct App {
 
 #[derive(Serialize, Deserialize, Clone, Eq, PartialEq, Debug)]
 struct Config {
-    /// Todo-list dabase path. 
+    /// Todo-list dabase path.
     dbpath: String,
 }
 
-/// State of the application, which is saved / loaded when the application starts and quits. 
+/// State of the application, which is saved / loaded when the application starts and quits.
 #[derive(Serialize, Deserialize, Clone, Eq, PartialEq, Debug)]
 struct State {
-    todo_list: TodoList,
-    backlog: TodoList,
+    version: String,
+    todo_lists: Vec<TodoList>,
 }
 
 impl Default for State {
     fn default() -> Self {
         Self {
-            todo_list: TodoList {
-                name: "Todo".to_owned(),
-                todos: vec![],
-            },
-            backlog: TodoList {
-                name: "Backlog".to_owned(),
-                todos: vec![],
-            },
+            version: APP_VERSION.to_owned(),
+            todo_lists: vec![
+                TodoList {
+                    name: "Todo".to_owned(),
+                    todos: vec![],
+                },
+                TodoList {
+                    name: "Backlog".to_owned(),
+                    todos: vec![],
+                },
+            ],
         }
     }
 }
@@ -54,7 +56,6 @@ struct Selection {
 }
 
 impl App {
-
     /// Creates and initializes the application.
     pub fn init() -> anyhow::Result<Self> {
         let config = load_app_config()?;
@@ -65,7 +66,7 @@ impl App {
         };
         Ok(Self {
             config,
-            todo_lists: vec![state.todo_list, state.backlog],
+            todo_lists: state.todo_lists,
             selection: Selection::default(),
             mode: Mode::Normal,
             key_mappings: default_key_mappings(),
@@ -78,7 +79,9 @@ impl App {
             terminal.draw(|frame| self.render(frame))?;
             let action = self.read_next_action()?;
             let quit = self.update(action)?;
-            if quit { break }
+            if quit {
+                break;
+            }
         }
         Ok(())
     }
@@ -95,7 +98,7 @@ impl App {
             Action::Quit => {
                 self.save()?;
                 return Ok(true);
-            },
+            }
             Action::SetMode(mode) => self.set_mode(mode),
             Action::MoveLeft => self.move_left(),
             Action::MoveRight => self.move_right(),
@@ -110,14 +113,13 @@ impl App {
             Action::MoveCursorLeft => self.move_cursor_left(),
             Action::MoveCursorStart => self.move_cursor_start(),
             Action::MoveCursorEnd => self.move_cursor_end(),
-            Action::Nop => {},
+            Action::Nop => {}
         }
         Ok(false)
     }
 
     /// Draws user interface.
     fn render(&self, frame: &mut Frame) {
-
         // Computes areas to render in
         let area = frame.area();
         let content_area = Rect {
@@ -172,17 +174,21 @@ impl App {
     fn read_next_action(&self) -> anyhow::Result<Action> {
         loop {
             match event::read()? {
-                Event::Key(KeyEvent { code, kind: KeyEventKind::Press, .. }) => {
+                Event::Key(KeyEvent {
+                    code,
+                    kind: KeyEventKind::Press,
+                    ..
+                }) => {
                     if let Some(action) = self.key_mappings.get(&(self.mode, code)) {
                         return Ok(*action);
                     } else if self.mode == Mode::Insert {
                         return Ok(Action::Input(code));
                     }
-                },
+                }
                 Event::Resize(_, _) => {
-                   return Ok(Action::Nop);
-                },
-                _ => {},
+                    return Ok(Action::Nop);
+                }
+                _ => {}
             }
         }
     }
@@ -440,15 +446,14 @@ impl App {
         self.selection.char = todo.name.len();
     }
 
-
     fn save(&self) -> anyhow::Result<()> {
         let dbpath = Path::new(&self.config.dbpath);
         if let Some(parent) = dbpath.parent() {
             std::fs::create_dir_all(parent)?;
         }
         let state = State {
-            todo_list: self.todo_lists[TODO_IDX].clone(),
-            backlog: self.todo_lists[BACKLOG_IDX].clone(),
+            todo_lists: self.todo_lists.clone(),
+            ..Default::default()
         };
         let state_str = serde_yaml::to_string(&state)?;
         std::fs::write(dbpath, state_str)?;
@@ -500,8 +505,7 @@ fn load_app_config() -> anyhow::Result<Config> {
         Ok(Config {
             dbpath: format!("{home_dir}/.local/share/tdi/db.yml"),
         })
-    }
-    else {
+    } else {
         let config_str: String = std::fs::read_to_string(config_path)?;
         let config: Config = serde_yaml::from_str(&config_str)?;
         Ok(config)
@@ -536,7 +540,7 @@ enum Action {
     MoveCursorLeft,
     MoveCursorStart,
     MoveCursorEnd,
-    Nop,                // No operation. Useful if app needs to rerender.
+    Nop, // No operation. Useful if app needs to rerender.
     Quit,
 }
 
