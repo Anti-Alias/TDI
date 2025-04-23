@@ -110,6 +110,7 @@ impl App {
             Action::MoveBottom => self.move_bottom(),
             Action::AddTodoAbove => self.add_todo(false),
             Action::AddTodoBelow => self.add_todo(true),
+            Action::ToggleMark => self.toggle_mark(),
             Action::Input(code) => self.input(code),
             Action::MoveCursorRight => self.move_cursor_right(),
             Action::MoveCursorLeft => self.move_cursor_left(),
@@ -144,15 +145,15 @@ impl App {
 
         // Renders todo lists
         if !self.todo_lists.is_empty() {
-            let sel_list_idx = self.selection.todo_list;
-            let sel_list_idx = sel_list_idx.min(self.todo_lists.len() - 1);
+            let todo_list_idx = self.selection.todo_list;
+            let todo_list_idx = todo_list_idx.min(self.todo_lists.len() - 1);
             for (i, (todo_list, todo_list_area)) in self
                 .todo_lists
                 .iter()
                 .zip(list_areas.iter().copied())
                 .enumerate()
             {
-                let is_list_selected = i == sel_list_idx;
+                let is_list_selected = i == todo_list_idx;
                 todo_list.render(
                     is_list_selected,
                     self.selection.todo,
@@ -333,20 +334,24 @@ impl App {
         self.set_mode(Mode::Insert);
         self.changed = true;
     }
+    
+    fn toggle_mark(&mut self) {
+        let Some((todo_list_idx, todo_idx)) = self.selected_todo() else { return };
+        let todo_list = &mut self.todo_lists[todo_list_idx];
+        let todo = &mut todo_list.todos[todo_idx];
+        todo.marked = !todo.marked;
+        self.changed = true;
+    }
 
     /// Removes the currently selected [`Todo`]
     fn delete_todo(&mut self) {
-        if self.todo_lists.is_empty() {
-            return;
-        };
-        let todo_list = &mut self.todo_lists[self.selection.todo_list];
-        let todos = &mut todo_list.todos;
-        if todos.is_empty() {
-            return;
-        };
-        let todo_idx = self.selection.todo.min(todos.len() - 1);
-        todos.remove(todo_idx);
-        self.changed = true;
+        let Some((todo_list_idx, todo_idx)) = self.selected_todo() else { return };
+        let todo_list = &mut self.todo_lists[todo_list_idx];
+        let todo = &mut todo_list.todos[todo_idx];
+        if !todo.marked {
+            todo_list.todos.remove(todo_idx);
+            self.changed = true;
+        }
     }
 
     fn move_todo_left(&mut self) {
@@ -492,26 +497,27 @@ impl App {
 
 fn default_key_mappings() -> HashMap<(Mode, KeyCode), Action> {
     let mut res = HashMap::new();
-    res.insert((Mode::Normal, KeyCode::Char('q')), Action::Quit);
-    res.insert((Mode::Normal, KeyCode::Char('o')), Action::AddTodoBelow);
-    res.insert((Mode::Normal, KeyCode::Char('O')), Action::AddTodoAbove);
-    res.insert((Mode::Normal, KeyCode::Char('x')), Action::DeleteTodo);
-    res.insert((Mode::Normal, KeyCode::Char('H')), Action::MoveTodoLeft);
-    res.insert((Mode::Normal, KeyCode::Char('J')), Action::MoveTodoDown);
-    res.insert((Mode::Normal, KeyCode::Char('K')), Action::MoveTodoUp);
-    res.insert((Mode::Normal, KeyCode::Char('L')), Action::MoveTodoRight);
-    res.insert((Mode::Normal, KeyCode::Char('h')), Action::MoveLeft);
-    res.insert((Mode::Normal, KeyCode::Char('j')), Action::MoveDown);
-    res.insert((Mode::Normal, KeyCode::Char('k')), Action::MoveUp);
-    res.insert((Mode::Normal, KeyCode::Char('l')), Action::MoveRight);
-    res.insert((Mode::Normal, KeyCode::Char('g')), Action::MoveTop);
-    res.insert((Mode::Normal, KeyCode::Char('G')), Action::MoveBottom);
-    res.insert((Mode::Normal, KeyCode::Home), Action::MoveTop);
-    res.insert((Mode::Normal, KeyCode::End), Action::MoveBottom);
-    res.insert((Mode::Normal, KeyCode::Left), Action::MoveLeft);
-    res.insert((Mode::Normal, KeyCode::Down), Action::MoveDown);
-    res.insert((Mode::Normal, KeyCode::Up), Action::MoveUp);
-    res.insert((Mode::Normal, KeyCode::Right), Action::MoveRight);
+    res.insert((Mode::Normal, KeyCode::Char('q')),  Action::Quit);
+    res.insert((Mode::Normal, KeyCode::Char('o')),  Action::AddTodoBelow);
+    res.insert((Mode::Normal, KeyCode::Char('O')),  Action::AddTodoAbove);
+    res.insert((Mode::Normal, KeyCode::Char('m')),  Action::ToggleMark);
+    res.insert((Mode::Normal, KeyCode::Char('x')),  Action::DeleteTodo);
+    res.insert((Mode::Normal, KeyCode::Char('H')),  Action::MoveTodoLeft);
+    res.insert((Mode::Normal, KeyCode::Char('J')),  Action::MoveTodoDown);
+    res.insert((Mode::Normal, KeyCode::Char('K')),  Action::MoveTodoUp);
+    res.insert((Mode::Normal, KeyCode::Char('L')),  Action::MoveTodoRight);
+    res.insert((Mode::Normal, KeyCode::Char('h')),  Action::MoveLeft);
+    res.insert((Mode::Normal, KeyCode::Char('j')),  Action::MoveDown);
+    res.insert((Mode::Normal, KeyCode::Char('k')),  Action::MoveUp);
+    res.insert((Mode::Normal, KeyCode::Char('l')),  Action::MoveRight);
+    res.insert((Mode::Normal, KeyCode::Char('g')),  Action::MoveTop);
+    res.insert((Mode::Normal, KeyCode::Char('G')),  Action::MoveBottom);
+    res.insert((Mode::Normal, KeyCode::Home),       Action::MoveTop);
+    res.insert((Mode::Normal, KeyCode::End),        Action::MoveBottom);
+    res.insert((Mode::Normal, KeyCode::Left),       Action::MoveLeft);
+    res.insert((Mode::Normal, KeyCode::Down),       Action::MoveDown);
+    res.insert((Mode::Normal, KeyCode::Up),         Action::MoveUp);
+    res.insert((Mode::Normal, KeyCode::Right),      Action::MoveRight);
     res.insert(
         (Mode::Normal, KeyCode::Char('i')),
         Action::SetMode(Mode::Insert),
@@ -563,6 +569,7 @@ enum Action {
     MoveBottom,
     AddTodoAbove,
     AddTodoBelow,
+    ToggleMark,
     Input(KeyCode),
     SetMode(Mode),
     MoveCursorRight,

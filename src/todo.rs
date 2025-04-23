@@ -40,9 +40,14 @@ impl TodoList {
             let todo_selected = todo_selected.min(self.todos.len()-1);
             for (i, todo) in self.todos.iter().enumerate() {
                 let is_todo_selected = mode == Mode::Normal && is_selected && i == todo_selected;
-                let (bg_color, fg_color) = match is_todo_selected {
-                    false => (color::BG_UNSELECTED, color::FG_UNSELECTED),
-                    true => (color::BG_SELECTED, color::FG_SELECTED),
+                let bg_color = match is_todo_selected {
+                    false => color::BG_UNSELECTED,
+                    true => color::BG_SELECTED,
+                };
+                let fg_color = match (is_todo_selected, todo.marked) {
+                    (_, true) => color::FG_MARKED,
+                    (false, false) => color::FG_UNSELECTED,
+                    (true, false) => color::FG_SELECTED,
                 };
                 line_area.y += 1;
                 if todo.name.is_empty() {
@@ -70,11 +75,16 @@ impl TodoList {
 #[derive(Serialize, Deserialize, Clone, Eq, PartialEq, Default, Debug)]
 pub(crate) struct Todo {
     pub name: String,
+    #[serde(default)]
+    pub marked: bool,
 }
 
 impl Todo {
     pub fn new(name: impl Into<String>) -> Self {
-        Self { name: name.into() }
+        Self {
+            name: name.into(),
+            marked: false,
+        }
     }
 }
 
