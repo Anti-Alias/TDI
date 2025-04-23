@@ -9,52 +9,15 @@ use std::path::Path;
 const APP_VERSION: & str = "0.1";
 const BACKLOG_LIST_IDX: usize = 1;
 
-#[derive(Serialize, Deserialize, Clone, Eq, PartialEq, Debug)]
-struct Config {
-    /// Todo-list dabase path.
-    dbpath: String,
-}
-
-/// State of the application, which is saved / loaded when the application starts and quits.
-#[derive(Serialize, Deserialize, Clone, Eq, PartialEq, Debug)]
-struct State {
-    version: String,
-    todo_lists: Vec<TodoList>,
-}
-
-impl Default for State {
-    fn default() -> Self {
-        Self {
-            version: APP_VERSION.to_owned(),
-            todo_lists: vec![
-                TodoList {
-                    name: "Todo".to_owned(),
-                    todos: vec![],
-                },
-                TodoList {
-                    name: "Backlog".to_owned(),
-                    todos: vec![],
-                },
-            ],
-        }
-    }
-}
-
-#[derive(Copy, Clone, Eq, PartialEq, Default, Debug)]
-struct Selection {
-    todo_list: usize, // Todo list selected
-    todo: usize,      // Todo in todo list selected
-    char: usize,      // Index of character in todo selected, if any
-}
 
 #[derive(Clone, Eq, PartialEq)]
 pub struct App {
     config: Config,
-    todo_lists: Vec<TodoList>,                      // All todo lists
-    selection: Selection,                           // What is currently selected by the user
+    todo_lists: Vec<TodoList>,                      // All todo lists.
+    selection: Selection,                           // What is currently selected by the user.
     mode: Mode,                                     // Mode of the app, influencing key presses.
-    key_mappings: HashMap<(Mode, KeyCode), Action>, // Maps key presses to actions for a given mode
-    changed: bool,                                  // Set to true if a change occurred, requiring saving
+    key_mappings: HashMap<(Mode, KeyCode), Action>, // Maps key presses to actions while in a given mode.
+    changed: bool,                                  // Set to true if a change occurred, requiring saving.
 }
 
 impl App {
@@ -502,6 +465,47 @@ impl App {
     }
 }
 
+/// Current item being selected in the [`App`].
+#[derive(Copy, Clone, Eq, PartialEq, Default, Debug)]
+struct Selection {
+    todo_list: usize, // Todo list selected
+    todo: usize,      // Todo in todo list selected
+    char: usize,      // Index of character in todo selected, if any
+}
+
+/// Configures an [App].
+#[derive(Serialize, Deserialize, Clone, Eq, PartialEq, Debug)]
+struct Config {
+    /// Todo-list dabase path.
+    dbpath: String,
+}
+
+/// Subset of the fields in [`App`], which are saved to a database file.
+#[derive(Serialize, Deserialize, Clone, Eq, PartialEq, Debug)]
+struct State {
+    version: String,
+    todo_lists: Vec<TodoList>,
+}
+
+impl Default for State {
+    fn default() -> Self {
+        Self {
+            version: APP_VERSION.to_owned(),
+            todo_lists: vec![
+                TodoList {
+                    name: "Todo".to_owned(),
+                    todos: vec![],
+                },
+                TodoList {
+                    name: "Backlog".to_owned(),
+                    todos: vec![],
+                },
+            ],
+        }
+    }
+}
+
+/// Default key mapping for various actions.
 fn default_key_mappings() -> HashMap<(Mode, KeyCode), Action> {
     let mut res = HashMap::new();
     res.insert((Mode::Normal, KeyCode::Char('q')),  Action::Quit);
