@@ -7,6 +7,7 @@ use std::collections::HashMap;
 use std::path::Path;
 
 const APP_VERSION: & str = "0.1";
+const BACKLOG_LIST_IDX: usize = 1;
 
 #[derive(Serialize, Deserialize, Clone, Eq, PartialEq, Debug)]
 struct Config {
@@ -352,6 +353,12 @@ impl App {
             todo_list.todos.remove(todo_idx);
             self.changed = true;
         }
+        else if todo_list_idx != BACKLOG_LIST_IDX {
+            let todo = todo_list.todos.remove(todo_idx);
+            let backlog_todo_list = &mut self.todo_lists[BACKLOG_LIST_IDX];
+            backlog_todo_list.todos.push(todo);
+            self.changed = true;
+        }
     }
 
     fn move_todo_left(&mut self) {
@@ -501,7 +508,7 @@ fn default_key_mappings() -> HashMap<(Mode, KeyCode), Action> {
     res.insert((Mode::Normal, KeyCode::Char('o')),  Action::AddTodoBelow);
     res.insert((Mode::Normal, KeyCode::Char('O')),  Action::AddTodoAbove);
     res.insert((Mode::Normal, KeyCode::Char('m')),  Action::ToggleMark);
-    res.insert((Mode::Normal, KeyCode::Char('x')),  Action::DeleteTodo);
+    res.insert((Mode::Normal, KeyCode::Char('d')),  Action::DeleteTodo);
     res.insert((Mode::Normal, KeyCode::Char('H')),  Action::MoveTodoLeft);
     res.insert((Mode::Normal, KeyCode::Char('J')),  Action::MoveTodoDown);
     res.insert((Mode::Normal, KeyCode::Char('K')),  Action::MoveTodoUp);
