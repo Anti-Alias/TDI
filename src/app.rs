@@ -92,15 +92,15 @@ impl App {
     /// Returns true if application should quit.
     fn update(&mut self, action: Action) -> anyhow::Result<bool> {
         match action {
+            Action::Quit => {
+                self.save()?;
+                return Ok(true);
+            }
             Action::DeleteTodo => self.delete_todo(),
             Action::MoveTodoLeft => self.move_todo_left(),
             Action::MoveTodoRight => self.move_todo_right(),
             Action::MoveTodoUp => self.move_todo_up(),
             Action::MoveTodoDown => self.move_todo_down(),
-            Action::Quit => {
-                self.save()?;
-                return Ok(true);
-            }
             Action::SetMode(mode) => self.set_mode(mode),
             Action::MoveLeft => self.move_left(),
             Action::MoveRight => self.move_right(),
@@ -238,15 +238,31 @@ impl App {
         Some((todo_list_idx, todo_idx))
     }
 
-    fn set_mode(&mut self, mode: Mode) {
-        if mode == Mode::Insert {
-            let todo_list = &self.todo_lists[self.selection.todo_list];
-            if todo_list.todos.is_empty() {
-                return;
-            }
-            self.selection.char = 0;
+    fn set_mode(&mut self, next_mode: Mode) {
+        match next_mode {
+            Mode::Insert => self.set_mode_insert(),
+            Mode::Normal => self.set_mode_normal(),
         }
-        self.mode = mode;
+    }
+
+    fn set_mode_insert(&mut self) {
+        let todo_list = &self.todo_lists[self.selection.todo_list];
+        if todo_list.todos.is_empty() { return }
+        self.selection.char = 0;
+        self.mode = Mode::Insert;
+    }
+
+    fn set_mode_normal(&mut self) {
+        self.mode = Mode::Normal;
+        let Some((todo_list_idx, todo_idx)) = self.selected_todo() else { return };
+        let todo_list = &mut self.todo_lists[todo_list_idx];
+        let todo = &mut todo_list.todos[todo_idx];
+        if todo.name.trim().is_empty() {
+            todo_list.todos.remove(todo_idx);
+        }
+        if self.selection.todo > 0 {
+            self.selection.todo -= 1;
+        }
     }
 
     fn move_left(&mut self) {
@@ -476,6 +492,7 @@ impl App {
 
 fn default_key_mappings() -> HashMap<(Mode, KeyCode), Action> {
     let mut res = HashMap::new();
+    res.insert((Mode::Normal, KeyCode::Char('q')), Action::Quit);
     res.insert((Mode::Normal, KeyCode::Char('o')), Action::AddTodoBelow);
     res.insert((Mode::Normal, KeyCode::Char('O')), Action::AddTodoAbove);
     res.insert((Mode::Normal, KeyCode::Char('x')), Action::DeleteTodo);
@@ -491,12 +508,10 @@ fn default_key_mappings() -> HashMap<(Mode, KeyCode), Action> {
     res.insert((Mode::Normal, KeyCode::Char('G')), Action::MoveBottom);
     res.insert((Mode::Normal, KeyCode::Home), Action::MoveTop);
     res.insert((Mode::Normal, KeyCode::End), Action::MoveBottom);
-    res.insert((Mode::Normal, KeyCode::Char('q')), Action::Quit);
     res.insert((Mode::Normal, KeyCode::Left), Action::MoveLeft);
     res.insert((Mode::Normal, KeyCode::Down), Action::MoveDown);
     res.insert((Mode::Normal, KeyCode::Up), Action::MoveUp);
     res.insert((Mode::Normal, KeyCode::Right), Action::MoveRight);
-    res.insert((Mode::Normal, KeyCode::Char('q')), Action::Quit);
     res.insert(
         (Mode::Normal, KeyCode::Char('i')),
         Action::SetMode(Mode::Insert),
@@ -534,6 +549,7 @@ fn load_app_state(dbpath: &str) -> anyhow::Result<State> {
 /// Value that causes an [`App`] to perform an action.
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]
 enum Action {
+    Quit,
     DeleteTodo,
     MoveTodoLeft,
     MoveTodoRight,
@@ -554,7 +570,6 @@ enum Action {
     MoveCursorStart,
     MoveCursorEnd,
     Nop, // No operation. Useful if app needs to rerender.
-    Quit,
 }
 
 /// Current mode of an [`App`] which determines the action keys map to.
