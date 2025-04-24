@@ -1,5 +1,5 @@
 use crate::{Todo, TodoList};
-use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind};
+use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::{DefaultTerminal, Frame};
 use serde::{Deserialize, Serialize};
@@ -16,11 +16,12 @@ pub struct App {
     todo_lists: Vec<TodoList>,                      // All todo lists.
     selection: Selection,                           // What is currently selected by the user.
     mode: Mode,                                     // Mode of the app, influencing key presses.
-    key_mappings: HashMap<(Mode, KeyCode), Action>, // Maps key presses to actions while in a given mode.
+    key_mappings: HashMap<KeyPress, Action>,        // Maps key presses to actions while in a given mode.
     snapshots: VecDeque<State>,                     // Snapshots of the app's state, used for undo/redo functionality.
     needs_saving: bool,                             // Set to true if a change occurred, requiring saving.
     current_snapshot: usize, 
     max_snapshots: usize, 
+    quit: bool,
 }
 
 impl App {
@@ -42,6 +43,7 @@ pub fn init() -> anyhow::Result<Self> {
             needs_saving: false,
             current_snapshot: 0,
             max_snapshots: 100,
+            quit: false,
         })
     }
 
@@ -50,22 +52,39 @@ pub fn init() -> anyhow::Result<Self> {
         loop {
             terminal.draw(|frame| self.render(frame))?;
             let action = self.read_next_action()?;
-            let quit = self.update(action)?;
-            if quit {
+            self.update(action)?;
+            if self.quit {
                 break;
             }
         }
         Ok(())
     }
 
+    /// Waits for an event, input, then returns the corresponding action
+    fn read_next_action(&self) -> anyhow::Result<Action> {
+        loop {
+            match event::read()? {
+                Event::Key(KeyEvent { code, kind: KeyEventKind::Press, modifiers, .. }) => {
+                    let key_press = KeyPress { mode: self.mode, code, modifiers };
+                    if let Some(action) = self.key_mappings.get(&key_press) {
+                        return Ok(*action);
+                    } else if self.mode == Mode::Insert {
+                        return Ok(Action::Input(code));
+                    }
+                }
+                Event::Resize(_, _) => {
+                    return Ok(Action::Nop);
+                }
+                _ => {}
+            }
+        }
+    }
+
     /// Waits for user input, then updates state.
     /// Returns true if application should quit.
-    fn update(&mut self, action: Action) -> anyhow::Result<bool> {
+    fn update(&mut self, action: Action) -> anyhow::Result<()> {
         match action {
-            Action::Quit => {
-                self.save()?;
-                return Ok(true);
-            }
+            Action::Quit => self.quit()?,
             Action::DeleteTodo => self.delete_todo(),
             Action::MoveTodoLeft => self.move_todo_left(),
             Action::MoveTodoRight => self.move_todo_right(),
@@ -90,7 +109,7 @@ pub fn init() -> anyhow::Result<Self> {
             Action::Redo => self.redo(),
             Action::Nop => {}
         }
-        Ok(false)
+        Ok(())
     }
 
     /// Draws user interface.
@@ -143,29 +162,6 @@ pub fn init() -> anyhow::Result<Self> {
             Mode::Insert => "Insert",
         };
         frame.render_widget(mode_text, bottom_area);
-    }
-
-    /// Waits for an event, input, then returns the corresponding action
-    fn read_next_action(&self) -> anyhow::Result<Action> {
-        loop {
-            match event::read()? {
-                Event::Key(KeyEvent {
-                    code,
-                    kind: KeyEventKind::Press,
-                    ..
-                }) => {
-                    if let Some(action) = self.key_mappings.get(&(self.mode, code)) {
-                        return Ok(*action);
-                    } else if self.mode == Mode::Insert {
-                        return Ok(Action::Input(code));
-                    }
-                }
-                Event::Resize(_, _) => {
-                    return Ok(Action::Nop);
-                }
-                _ => {}
-            }
-        }
     }
 
     /// Index of the currently selected todo list
@@ -502,6 +498,12 @@ pub fn init() -> anyhow::Result<Self> {
         self.needs_saving = true;
     }
 
+    fn quit(&mut self) -> anyhow::Result<()> {
+        self.save()?;
+        self.quit = true;
+        Ok(())
+    }
+
     fn create_snapshot(&mut self) {
         for i in (self.current_snapshot..self.snapshots.len()).rev() {
             self.snapshots.remove(i);
@@ -569,41 +571,43 @@ impl Default for State {
 }
 
 /// Default key mapping for various actions.
-fn default_key_mappings() -> HashMap<(Mode, KeyCode), Action> {
+fn default_key_mappings() -> HashMap<KeyPress, Action> {
     let mut res = HashMap::new();
-    res.insert((Mode::Normal, KeyCode::Char('q')),  Action::Quit);
-    res.insert((Mode::Normal, KeyCode::Char('o')),  Action::AddTodoBelow);
-    res.insert((Mode::Normal, KeyCode::Char('O')),  Action::AddTodoAbove);
-    res.insert((Mode::Normal, KeyCode::Char('m')),  Action::ToggleMark);
-    res.insert((Mode::Normal, KeyCode::Char('d')),  Action::DeleteTodo);
-    res.insert((Mode::Normal, KeyCode::Char('H')),  Action::MoveTodoLeft);
-    res.insert((Mode::Normal, KeyCode::Char('J')),  Action::MoveTodoDown);
-    res.insert((Mode::Normal, KeyCode::Char('K')),  Action::MoveTodoUp);
-    res.insert((Mode::Normal, KeyCode::Char('L')),  Action::MoveTodoRight);
-    res.insert((Mode::Normal, KeyCode::Char('h')),  Action::MoveLeft);
-    res.insert((Mode::Normal, KeyCode::Char('j')),  Action::MoveDown);
-    res.insert((Mode::Normal, KeyCode::Char('k')),  Action::MoveUp);
-    res.insert((Mode::Normal, KeyCode::Char('l')),  Action::MoveRight);
-    res.insert((Mode::Normal, KeyCode::Char('g')),  Action::MoveTop);
-    res.insert((Mode::Normal, KeyCode::Char('G')),  Action::MoveBottom);
-    res.insert((Mode::Normal, KeyCode::Home),       Action::MoveTop);
-    res.insert((Mode::Normal, KeyCode::End),        Action::MoveBottom);
-    res.insert((Mode::Normal, KeyCode::Left),       Action::MoveLeft);
-    res.insert((Mode::Normal, KeyCode::Down),       Action::MoveDown);
-    res.insert((Mode::Normal, KeyCode::Up),         Action::MoveUp);
-    res.insert((Mode::Normal, KeyCode::Right),      Action::MoveRight);
-    res.insert((Mode::Normal, KeyCode::Char('u')),  Action::Undo);
-    res.insert((Mode::Normal, KeyCode::Char('r')),  Action::Redo);
-    res.insert(
-        (Mode::Normal, KeyCode::Char('i')),
-        Action::SetMode(Mode::Insert),
-    );
-    res.insert((Mode::Insert, KeyCode::Esc), Action::SetMode(Mode::Normal));
-    res.insert((Mode::Insert, KeyCode::Right), Action::MoveCursorRight);
-    res.insert((Mode::Insert, KeyCode::Left), Action::MoveCursorLeft);
-    res.insert((Mode::Insert, KeyCode::Home), Action::MoveCursorStart);
-    res.insert((Mode::Insert, KeyCode::End), Action::MoveCursorEnd);
-    res.insert((Mode::Normal, KeyCode::End), Action::MoveCursorEnd);
+    res.insert(KeyPress::char(Mode::Normal, 'q'),                                   Action::Quit);
+    res.insert(KeyPress::char(Mode::Normal, 'o'),                                   Action::AddTodoBelow);
+    res.insert(KeyPress::char(Mode::Normal, 'O'),                                   Action::AddTodoAbove);
+    res.insert(KeyPress::char(Mode::Normal, 'm'),                                   Action::ToggleMark);
+    res.insert(KeyPress::char(Mode::Normal, 'd'),                                   Action::DeleteTodo);
+    res.insert(KeyPress::char(Mode::Normal, 'H'),                                   Action::MoveTodoLeft);
+    res.insert(KeyPress::char(Mode::Normal, 'J'),                                   Action::MoveTodoDown);
+    res.insert(KeyPress::char(Mode::Normal, 'K'),                                   Action::MoveTodoUp);
+    res.insert(KeyPress::char(Mode::Normal, 'L'),                                   Action::MoveTodoRight);
+    res.insert(KeyPress::new(Mode::Normal, KeyCode::Left, KeyModifiers::SHIFT),     Action::MoveTodoLeft);
+    res.insert(KeyPress::new(Mode::Normal, KeyCode::Down, KeyModifiers::SHIFT),     Action::MoveTodoDown);
+    res.insert(KeyPress::new(Mode::Normal, KeyCode::Up, KeyModifiers::SHIFT),       Action::MoveTodoUp);
+    res.insert(KeyPress::new(Mode::Normal, KeyCode::Right, KeyModifiers::SHIFT),    Action::MoveTodoRight);
+    res.insert(KeyPress::char(Mode::Normal, 'K'),                                   Action::MoveTodoUp);
+    res.insert(KeyPress::char(Mode::Normal, 'L'),                                   Action::MoveTodoRight);
+    res.insert(KeyPress::char(Mode::Normal, 'h'),                                   Action::MoveLeft);
+    res.insert(KeyPress::char(Mode::Normal, 'j'),                                   Action::MoveDown);
+    res.insert(KeyPress::char(Mode::Normal, 'k'),                                   Action::MoveUp);
+    res.insert(KeyPress::char(Mode::Normal, 'l'),                                   Action::MoveRight);
+    res.insert(KeyPress::char(Mode::Normal, 'g'),                                   Action::MoveTop);
+    res.insert(KeyPress::char(Mode::Normal, 'G'),                                   Action::MoveBottom);
+    res.insert(KeyPress::code(Mode::Normal, KeyCode::Home),                         Action::MoveTop);
+    res.insert(KeyPress::code(Mode::Normal, KeyCode::End),                          Action::MoveBottom);
+    res.insert(KeyPress::code(Mode::Normal, KeyCode::Left),                         Action::MoveLeft);
+    res.insert(KeyPress::code(Mode::Normal, KeyCode::Down),                         Action::MoveDown);
+    res.insert(KeyPress::code(Mode::Normal, KeyCode::Up),                           Action::MoveUp);
+    res.insert(KeyPress::code(Mode::Normal, KeyCode::Right),                        Action::MoveRight);
+    res.insert(KeyPress::char(Mode::Normal, 'u'),                                   Action::Undo);
+    res.insert(KeyPress::char(Mode::Normal, 'r'),                                   Action::Redo);
+    res.insert(KeyPress::char(Mode::Normal, 'i'),                                   Action::SetMode(Mode::Insert));
+    res.insert(KeyPress::code(Mode::Insert, KeyCode::Esc),                          Action::SetMode(Mode::Normal));
+    res.insert(KeyPress::code(Mode::Insert, KeyCode::Right),                        Action::MoveCursorRight);
+    res.insert(KeyPress::code(Mode::Insert, KeyCode::Left),                         Action::MoveCursorLeft);
+    res.insert(KeyPress::code(Mode::Insert, KeyCode::Home),                         Action::MoveCursorStart);
+    res.insert(KeyPress::code(Mode::Insert, KeyCode::End),                          Action::MoveCursorEnd);
     res
 }
 
@@ -665,4 +669,32 @@ pub(crate) enum Mode {
     Normal,
     /// Mode when inserting a value in the cell of a todo.
     Insert,
+}
+
+/// Represents a key press, while in a particular mode, with optional modifiers like shift and ctrl
+/// being pressed.
+#[derive(Copy, Clone, Eq, Hash, PartialEq, Debug)]
+pub(crate) struct KeyPress {
+    mode: Mode,
+    code: KeyCode,
+    modifiers: KeyModifiers, 
+}
+
+impl KeyPress {
+
+    pub fn new(mode: Mode, code: KeyCode, modifiers: KeyModifiers) -> Self {
+        let modifiers = match code {
+            KeyCode::Char(c) if c.is_ascii_uppercase() => modifiers | KeyModifiers::SHIFT,
+            _ => modifiers,
+        };
+        Self { mode, code, modifiers }
+    }
+
+    pub fn char(mode: Mode, char: char) -> Self {
+        Self::new(mode, KeyCode::Char(char), KeyModifiers::empty())
+    }
+
+    pub fn code(mode: Mode, code: KeyCode) -> Self {
+        Self::new(mode, code, KeyModifiers::empty())
+    }
 }
