@@ -3,7 +3,7 @@ use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind};
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::{DefaultTerminal, Frame};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::path::Path;
 
 const APP_VERSION: & str = "0.1";
@@ -17,12 +17,15 @@ pub struct App {
     selection: Selection,                           // What is currently selected by the user.
     mode: Mode,                                     // Mode of the app, influencing key presses.
     key_mappings: HashMap<(Mode, KeyCode), Action>, // Maps key presses to actions while in a given mode.
-    changed: bool,                                  // Set to true if a change occurred, requiring saving.
+    snapshots: VecDeque<State>,                     // Snapshots of the app's state, used for undo/redo functionality.
+    needs_saving: bool,                             // Set to true if a change occurred, requiring saving.
+    current_snapshot: usize, 
+    max_snapshots: usize, 
 }
 
 impl App {
-    /// Creates and initializes the application.
-    pub fn init() -> anyhow::Result<Self> {
+/// Creates and initializes the application.
+pub fn init() -> anyhow::Result<Self> {
         let config = load_app_config()?;
         let dbpath = &config.dbpath;
         let state = match Path::new(dbpath).exists() {
@@ -35,7 +38,10 @@ impl App {
             selection: Selection::default(),
             mode: Mode::Normal,
             key_mappings: default_key_mappings(),
-            changed: false,
+            snapshots: VecDeque::new(),
+            needs_saving: false,
+            current_snapshot: 0,
+            max_snapshots: 100,
         })
     }
 
@@ -80,6 +86,8 @@ impl App {
             Action::MoveCursorLeft => self.move_cursor_left(),
             Action::MoveCursorStart => self.move_cursor_start(),
             Action::MoveCursorEnd => self.move_cursor_end(),
+            Action::Undo => self.undo(),
+            Action::Redo => self.redo(),
             Action::Nop => {}
         }
         Ok(false)
@@ -204,6 +212,9 @@ impl App {
     }
 
     fn set_mode(&mut self, next_mode: Mode) {
+        if next_mode == Mode::Insert {
+            self.create_snapshot();
+        }
         match next_mode {
             Mode::Insert => self.set_mode_insert(),
             Mode::Normal => self.set_mode_normal(),
@@ -224,6 +235,7 @@ impl App {
         let todo = &mut todo_list.todos[todo_idx];
         if todo.name.trim().is_empty() {
             todo_list.todos.remove(todo_idx);
+            self.snapshots.pop_back();
         }
         if self.selection.todo > 0 {
             self.selection.todo -= 1;
@@ -287,6 +299,8 @@ impl App {
         if self.todo_lists.is_empty() {
             return;
         };
+        self.create_snapshot();
+        self.set_mode_insert();
         let todo_list = &mut self.todo_lists[self.selection.todo_list];
         let todos = &mut todo_list.todos;
         let todo_idx = match below {
@@ -295,16 +309,16 @@ impl App {
         };
         todos.insert(todo_idx, Todo::new(""));
         self.selection.todo = todo_idx;
-        self.set_mode(Mode::Insert);
-        self.changed = true;
+        self.needs_saving = true;
     }
     
     fn toggle_mark(&mut self) {
         let Some((todo_list_idx, todo_idx)) = self.selected_todo() else { return };
+        self.create_snapshot();
         let todo_list = &mut self.todo_lists[todo_list_idx];
         let todo = &mut todo_list.todos[todo_idx];
         todo.marked = !todo.marked;
-        self.changed = true;
+        self.needs_saving = true;
     }
 
     /// Removes the currently selected [`Todo`]
@@ -313,14 +327,18 @@ impl App {
         let todo_list = &mut self.todo_lists[todo_list_idx];
         let todo = &mut todo_list.todos[todo_idx];
         if !todo.marked {
+            self.create_snapshot();
+            let todo_list = &mut self.todo_lists[todo_list_idx];
             todo_list.todos.remove(todo_idx);
-            self.changed = true;
+            self.needs_saving = true;
         }
         else if todo_list_idx != BACKLOG_LIST_IDX {
+            self.create_snapshot();
+            let todo_list = &mut self.todo_lists[todo_list_idx];
             let todo = todo_list.todos.remove(todo_idx);
             let backlog_todo_list = &mut self.todo_lists[BACKLOG_LIST_IDX];
             backlog_todo_list.todos.push(todo);
-            self.changed = true;
+            self.needs_saving = true;
         }
     }
 
@@ -331,13 +349,14 @@ impl App {
         if todo_list_idx == 0 {
             return;
         };
+        self.create_snapshot();
         let todo_list = &mut self.todo_lists[todo_list_idx];
         let todo = todo_list.todos.remove(todo_idx);
         let next_todo_list = &mut self.todo_lists[todo_list_idx - 1];
         let next_todo_idx = self.selection.todo.min(next_todo_list.todos.len());
         next_todo_list.todos.insert(next_todo_idx, todo);
         self.selection.todo_list -= 1;
-        self.changed = true;
+        self.needs_saving = true;
     }
 
     fn move_todo_right(&mut self) {
@@ -347,13 +366,14 @@ impl App {
         if todo_list_idx == self.todo_lists.len() - 1 {
             return;
         };
+        self.create_snapshot();
         let todo_list = &mut self.todo_lists[todo_list_idx];
         let todo = todo_list.todos.remove(todo_idx);
         let next_todo_list = &mut self.todo_lists[todo_list_idx + 1];
         let next_todo_idx = self.selection.todo.min(next_todo_list.todos.len());
         next_todo_list.todos.insert(next_todo_idx, todo);
         self.selection.todo_list += 1;
-        self.changed = true;
+        self.needs_saving = true;
     }
 
     fn move_todo_up(&mut self) {
@@ -363,23 +383,26 @@ impl App {
         if todo_idx == 0 {
             return;
         };
+        self.create_snapshot();
         let todo_list = &mut self.todo_lists[todo_list_idx];
         todo_list.todos.swap(todo_idx, todo_idx - 1);
         self.select_todo(todo_list_idx, todo_idx - 1);
-        self.changed = true;
+        self.needs_saving = true;
     }
 
     fn move_todo_down(&mut self) {
         let Some((todo_list_idx, todo_idx)) = self.selected_todo() else {
             return;
         };
-        let todo_list = &mut self.todo_lists[todo_list_idx];
+        let todo_list = &self.todo_lists[todo_list_idx];
         if todo_idx == todo_list.todos.len() - 1 {
             return;
         };
+        self.create_snapshot();
+        let todo_list = &mut self.todo_lists[todo_list_idx];
         todo_list.todos.swap(todo_idx, todo_idx + 1);
         self.select_todo(todo_list_idx, todo_idx + 1);
-        self.changed = true;
+        self.needs_saving = true;
     }
 
     /// Inputs a character to the name of the currently selected [`Todo`].
@@ -413,7 +436,7 @@ impl App {
             }
             _ => {}
         }
-        self.changed = true;
+        self.needs_saving = true;
     }
 
     fn move_cursor_right(&mut self) {
@@ -447,21 +470,48 @@ impl App {
     }
 
     fn save(&mut self) -> anyhow::Result<()> {
-        if !self.changed {
+        if !self.needs_saving {
             return Ok(());
         }
         let dbpath = Path::new(&self.config.dbpath);
         if let Some(parent) = dbpath.parent() {
             std::fs::create_dir_all(parent)?;
         }
-        let state = State {
-            todo_lists: self.todo_lists.clone(),
-            ..Default::default()
-        };
+        let state = State::create(self);
         let state_str = serde_yaml::to_string(&state)?;
         std::fs::write(dbpath, state_str)?;
-        self.changed = false;
+        self.needs_saving = false;
         Ok(())
+    }
+
+    fn undo(&mut self) {
+        if self.current_snapshot == 0 { return };
+        self.current_snapshot -= 1;
+        let mut snapshot = State::create(self);
+        std::mem::swap(&mut snapshot, &mut self.snapshots[self.current_snapshot]);
+        snapshot.restore(self);
+        self.needs_saving = true;
+    }
+
+    fn redo(&mut self) {
+        if self.current_snapshot == self.snapshots.len() { return };
+        let mut snapshot = State::create(self);
+        std::mem::swap(&mut snapshot, &mut self.snapshots[self.current_snapshot]);
+        snapshot.restore(self);
+        self.current_snapshot += 1;
+        self.needs_saving = true;
+    }
+
+    fn create_snapshot(&mut self) {
+        for i in (self.current_snapshot..self.snapshots.len()).rev() {
+            self.snapshots.remove(i);
+        }
+        self.snapshots.push_back(State::create(self));
+        self.current_snapshot += 1;
+        if self.snapshots.len() > self.max_snapshots {
+            self.snapshots.pop_front();
+            self.current_snapshot -= 1;
+        }
     }
 }
 
@@ -485,6 +535,19 @@ struct Config {
 struct State {
     version: String,
     todo_lists: Vec<TodoList>,
+}
+
+impl State {
+    fn create(app: &App) -> Self {
+        Self {
+            todo_lists: app.todo_lists.clone(),
+            ..Default::default()
+        }
+    }
+
+    fn restore(self, app: &mut App) {
+        app.todo_lists = self.todo_lists;
+    }
 }
 
 impl Default for State {
@@ -529,6 +592,8 @@ fn default_key_mappings() -> HashMap<(Mode, KeyCode), Action> {
     res.insert((Mode::Normal, KeyCode::Down),       Action::MoveDown);
     res.insert((Mode::Normal, KeyCode::Up),         Action::MoveUp);
     res.insert((Mode::Normal, KeyCode::Right),      Action::MoveRight);
+    res.insert((Mode::Normal, KeyCode::Char('u')),  Action::Undo);
+    res.insert((Mode::Normal, KeyCode::Char('r')),  Action::Redo);
     res.insert(
         (Mode::Normal, KeyCode::Char('i')),
         Action::SetMode(Mode::Insert),
@@ -538,6 +603,7 @@ fn default_key_mappings() -> HashMap<(Mode, KeyCode), Action> {
     res.insert((Mode::Insert, KeyCode::Left), Action::MoveCursorLeft);
     res.insert((Mode::Insert, KeyCode::Home), Action::MoveCursorStart);
     res.insert((Mode::Insert, KeyCode::End), Action::MoveCursorEnd);
+    res.insert((Mode::Normal, KeyCode::End), Action::MoveCursorEnd);
     res
 }
 
@@ -587,6 +653,8 @@ enum Action {
     MoveCursorLeft,
     MoveCursorStart,
     MoveCursorEnd,
+    Undo,
+    Redo,
     Nop, // No operation. Useful if app needs to rerender.
 }
 
