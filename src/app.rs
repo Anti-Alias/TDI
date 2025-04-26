@@ -8,6 +8,7 @@ use std::path::Path;
 
 const APP_VERSION: & str = "0.1";
 const BACKLOG_LIST_IDX: usize = 1;
+const MOVE_HALF_AMOUNT: usize = 10;
 
 
 #[derive(Clone, Eq, PartialEq)]
@@ -95,6 +96,8 @@ pub fn init() -> anyhow::Result<Self> {
             Action::MoveRight => self.move_right(),
             Action::MoveUp => self.move_up(),
             Action::MoveDown => self.move_down(),
+            Action::MoveUpHalf => self.move_up_half(),
+            Action::MoveDownHalf => self.move_down_half(),
             Action::MoveTop => self.move_top(),
             Action::MoveBottom => self.move_bottom(),
             Action::AddTodoAbove => self.add_todo(false),
@@ -270,6 +273,32 @@ pub fn init() -> anyhow::Result<Self> {
             return;
         };
         self.select_todo(todo_list_idx, todo_idx + 1);
+    }
+
+    fn move_up_half(&mut self) {
+        let Some((todo_list_idx, todo_idx)) = self.selected_todo() else {
+            return;
+        };
+        let next_todo_idx = if todo_idx > MOVE_HALF_AMOUNT {
+            todo_idx - MOVE_HALF_AMOUNT
+        }
+        else {
+            0
+        };
+        self.select_todo(todo_list_idx, next_todo_idx);
+    }
+
+    fn move_down_half(&mut self) {
+        let Some((todo_list_idx, todo_idx)) = self.selected_todo() else {
+            return;
+        };
+        let todo_list = &self.todo_lists[todo_list_idx];
+        let last_todo_idx = match todo_list.todos.len() {
+            0 => return,
+            len => len-1,
+        };
+        let next_todo_idx = (todo_idx + MOVE_HALF_AMOUNT).min(last_todo_idx);
+        self.select_todo(todo_list_idx, next_todo_idx);
     }
 
     fn move_top(&mut self) {
@@ -573,41 +602,44 @@ impl Default for State {
 /// Default key mapping for various actions.
 fn default_key_mappings() -> HashMap<KeyPress, Action> {
     let mut res = HashMap::new();
-    res.insert(KeyPress::char(Mode::Normal, 'q'),                                   Action::Quit);
-    res.insert(KeyPress::char(Mode::Normal, 'o'),                                   Action::AddTodoBelow);
-    res.insert(KeyPress::char(Mode::Normal, 'O'),                                   Action::AddTodoAbove);
-    res.insert(KeyPress::char(Mode::Normal, 'm'),                                   Action::ToggleMark);
-    res.insert(KeyPress::char(Mode::Normal, 'd'),                                   Action::DeleteTodo);
-    res.insert(KeyPress::char(Mode::Normal, 'H'),                                   Action::MoveTodoLeft);
-    res.insert(KeyPress::char(Mode::Normal, 'J'),                                   Action::MoveTodoDown);
-    res.insert(KeyPress::char(Mode::Normal, 'K'),                                   Action::MoveTodoUp);
-    res.insert(KeyPress::char(Mode::Normal, 'L'),                                   Action::MoveTodoRight);
-    res.insert(KeyPress::new(Mode::Normal, KeyCode::Left, KeyModifiers::SHIFT),     Action::MoveTodoLeft);
-    res.insert(KeyPress::new(Mode::Normal, KeyCode::Down, KeyModifiers::SHIFT),     Action::MoveTodoDown);
-    res.insert(KeyPress::new(Mode::Normal, KeyCode::Up, KeyModifiers::SHIFT),       Action::MoveTodoUp);
-    res.insert(KeyPress::new(Mode::Normal, KeyCode::Right, KeyModifiers::SHIFT),    Action::MoveTodoRight);
-    res.insert(KeyPress::char(Mode::Normal, 'K'),                                   Action::MoveTodoUp);
-    res.insert(KeyPress::char(Mode::Normal, 'L'),                                   Action::MoveTodoRight);
-    res.insert(KeyPress::char(Mode::Normal, 'h'),                                   Action::MoveLeft);
-    res.insert(KeyPress::char(Mode::Normal, 'j'),                                   Action::MoveDown);
-    res.insert(KeyPress::char(Mode::Normal, 'k'),                                   Action::MoveUp);
-    res.insert(KeyPress::char(Mode::Normal, 'l'),                                   Action::MoveRight);
-    res.insert(KeyPress::char(Mode::Normal, 'g'),                                   Action::MoveTop);
-    res.insert(KeyPress::char(Mode::Normal, 'G'),                                   Action::MoveBottom);
-    res.insert(KeyPress::code(Mode::Normal, KeyCode::Home),                         Action::MoveTop);
-    res.insert(KeyPress::code(Mode::Normal, KeyCode::End),                          Action::MoveBottom);
-    res.insert(KeyPress::code(Mode::Normal, KeyCode::Left),                         Action::MoveLeft);
-    res.insert(KeyPress::code(Mode::Normal, KeyCode::Down),                         Action::MoveDown);
-    res.insert(KeyPress::code(Mode::Normal, KeyCode::Up),                           Action::MoveUp);
-    res.insert(KeyPress::code(Mode::Normal, KeyCode::Right),                        Action::MoveRight);
-    res.insert(KeyPress::char(Mode::Normal, 'u'),                                   Action::Undo);
-    res.insert(KeyPress::char(Mode::Normal, 'r'),                                   Action::Redo);
-    res.insert(KeyPress::char(Mode::Normal, 'i'),                                   Action::SetMode(Mode::Insert));
-    res.insert(KeyPress::code(Mode::Insert, KeyCode::Esc),                          Action::SetMode(Mode::Normal));
-    res.insert(KeyPress::code(Mode::Insert, KeyCode::Right),                        Action::MoveCursorRight);
-    res.insert(KeyPress::code(Mode::Insert, KeyCode::Left),                         Action::MoveCursorLeft);
-    res.insert(KeyPress::code(Mode::Insert, KeyCode::Home),                         Action::MoveCursorStart);
-    res.insert(KeyPress::code(Mode::Insert, KeyCode::End),                          Action::MoveCursorEnd);
+    res.insert(KeyPress::char(Mode::Normal, 'q'),                                       Action::Quit);
+    res.insert(KeyPress::char(Mode::Normal, 'o'),                                       Action::AddTodoBelow);
+    res.insert(KeyPress::char(Mode::Normal, 'O'),                                       Action::AddTodoAbove);
+    res.insert(KeyPress::char(Mode::Normal, 'm'),                                       Action::ToggleMark);
+    res.insert(KeyPress::char(Mode::Normal, 'd'),                                       Action::DeleteTodo);
+    res.insert(KeyPress::char(Mode::Normal, 'H'),                                       Action::MoveTodoLeft);
+    res.insert(KeyPress::char(Mode::Normal, 'J'),                                       Action::MoveTodoDown);
+    res.insert(KeyPress::char(Mode::Normal, 'K'),                                       Action::MoveTodoUp);
+    res.insert(KeyPress::char(Mode::Normal, 'L'),                                       Action::MoveTodoRight);
+    res.insert(KeyPress::new(Mode::Normal, KeyCode::Left, KeyModifiers::SHIFT),         Action::MoveTodoLeft);
+    res.insert(KeyPress::new(Mode::Normal, KeyCode::Down, KeyModifiers::SHIFT),         Action::MoveTodoDown);
+    res.insert(KeyPress::new(Mode::Normal, KeyCode::Up, KeyModifiers::SHIFT),           Action::MoveTodoUp);
+    res.insert(KeyPress::new(Mode::Normal, KeyCode::Right, KeyModifiers::SHIFT),        Action::MoveTodoRight);
+    res.insert(KeyPress::char(Mode::Normal, 'K'),                                       Action::MoveTodoUp);
+    res.insert(KeyPress::char(Mode::Normal, 'L'),                                       Action::MoveTodoRight);
+    res.insert(KeyPress::char(Mode::Normal, 'h'),                                       Action::MoveLeft);
+    res.insert(KeyPress::char(Mode::Normal, 'j'),                                       Action::MoveDown);
+    res.insert(KeyPress::char(Mode::Normal, 'k'),                                       Action::MoveUp);
+    res.insert(KeyPress::new(Mode::Normal, KeyCode::Char('d'), KeyModifiers::CONTROL),  Action::MoveDownHalf);
+    res.insert(KeyPress::new(Mode::Normal, KeyCode::Char('u'), KeyModifiers::CONTROL),  Action::MoveUpHalf);
+    res.insert(KeyPress::char(Mode::Normal, 'k'),                                       Action::MoveUp);
+    res.insert(KeyPress::char(Mode::Normal, 'l'),                                       Action::MoveRight);
+    res.insert(KeyPress::char(Mode::Normal, 'g'),                                       Action::MoveTop);
+    res.insert(KeyPress::char(Mode::Normal, 'G'),                                       Action::MoveBottom);
+    res.insert(KeyPress::code(Mode::Normal, KeyCode::Home),                             Action::MoveTop);
+    res.insert(KeyPress::code(Mode::Normal, KeyCode::End),                              Action::MoveBottom);
+    res.insert(KeyPress::code(Mode::Normal, KeyCode::Left),                             Action::MoveLeft);
+    res.insert(KeyPress::code(Mode::Normal, KeyCode::Down),                             Action::MoveDown);
+    res.insert(KeyPress::code(Mode::Normal, KeyCode::Up),                               Action::MoveUp);
+    res.insert(KeyPress::code(Mode::Normal, KeyCode::Right),                            Action::MoveRight);
+    res.insert(KeyPress::char(Mode::Normal, 'u'),                                       Action::Undo);
+    res.insert(KeyPress::char(Mode::Normal, 'r'),                                       Action::Redo);
+    res.insert(KeyPress::char(Mode::Normal, 'i'),                                       Action::SetMode(Mode::Insert));
+    res.insert(KeyPress::code(Mode::Insert, KeyCode::Esc),                              Action::SetMode(Mode::Normal));
+    res.insert(KeyPress::code(Mode::Insert, KeyCode::Right),                            Action::MoveCursorRight);
+    res.insert(KeyPress::code(Mode::Insert, KeyCode::Left),                             Action::MoveCursorLeft);
+    res.insert(KeyPress::code(Mode::Insert, KeyCode::Home),                             Action::MoveCursorStart);
+    res.insert(KeyPress::code(Mode::Insert, KeyCode::End),                              Action::MoveCursorEnd);
     res
 }
 
@@ -646,6 +678,8 @@ enum Action {
     MoveRight,
     MoveUp,
     MoveDown,
+    MoveUpHalf,
+    MoveDownHalf,
     MoveTop,
     MoveBottom,
     AddTodoAbove,
