@@ -8,7 +8,7 @@ use std::path::Path;
 
 const APP_VERSION: & str = "0.1";
 const BACKLOG_LIST_IDX: usize = 1;
-const MOVE_HALF_AMOUNT: usize = 10;
+const MOVE_HALF_AMOUNT: usize = 5;
 
 
 #[derive(Clone, Eq, PartialEq)]
